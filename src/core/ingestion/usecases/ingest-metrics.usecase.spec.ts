@@ -6,8 +6,8 @@ import {
   Thresholds,
   ThresholdsContract,
 } from '../contracts/thresholds.contract.js';
-import { DiagnosticVo } from '../value-objects/diagnostic.vo.js';
 import { Metric } from '../value-objects/metrics.vo.js';
+import { RecommendationVo } from '../value-objects/recommendation.vo.js';
 
 class InMemoryThresholds implements ThresholdsContract {
   getAnomalyThreshold(): Thresholds {
@@ -25,19 +25,19 @@ class InMemoryThresholds implements ThresholdsContract {
   }
 }
 
-const cannedDiagnostic: DiagnosticVo = {
-  summary: 'High load on database and compute resources',
-  probableRootCause: 'Slow queries saturating CPU and I/O',
-  overallSeverity: 'high',
-  recommendations: [
-    'Inspect active database queries',
-    'Check connection pool usage',
-  ],
-};
+const cannedRecommendations: RecommendationVo[] = [
+  {
+    id: 'rec_1',
+    action: 'Increase database connection pool and enable autoscaling',
+    target: 'database',
+    parameters: { max_connections: 200 },
+    benefit_estimate: 'Reduce latency below 200ms',
+  },
+];
 
-class FakeDiagnosticGateway implements RecommendationGatewayContract {
-  async diagnose(): Promise<DiagnosticVo> {
-    return cannedDiagnostic;
+class FakeRecommendationGateway implements RecommendationGatewayContract {
+  async generateRecommendations(): Promise<RecommendationVo[]> {
+    return cannedRecommendations;
   }
 }
 
@@ -65,11 +65,11 @@ const buildMetric = (overrides: Partial<Metric> = {}): Metric => ({
 });
 
 describe('IngestMetricsUsecase', () => {
-  let diagnosticGateway: FakeDiagnosticGateway;
+  let diagnosticGateway: FakeRecommendationGateway;
   let usecase: IngestMetricsUsecase;
 
   beforeEach(() => {
-    diagnosticGateway = new FakeDiagnosticGateway();
+    diagnosticGateway = new FakeRecommendationGateway();
     usecase = new IngestMetricsUsecase(
       new InMemoryThresholds(),
       diagnosticGateway,
@@ -77,7 +77,7 @@ describe('IngestMetricsUsecase', () => {
   });
 
   it('summarizes metrics and skips diagnostic when everything is normal', async () => {
-    const diagnoseSpy = vi.spyOn(diagnosticGateway, 'diagnose');
+    const generateSpy = vi.spyOn(diagnosticGateway, 'generateRecommendations');
     const metrics = [
       buildMetric({ latency_ms: 40, cpu_usage: 50 }),
       buildMetric({ latency_ms: 60, cpu_usage: 60 }),
@@ -88,9 +88,8 @@ describe('IngestMetricsUsecase', () => {
     expect(result.insights.average_latency_ms).toBe(50);
     expect(result.insights.max_cpu_usage).toBe(60);
     expect(result.anomalies).toEqual([]);
-    expect(result.hasPotentialIssues).toBe(false);
-    expect(result.diagnostic).toBeNull();
-    expect(diagnoseSpy).not.toHaveBeenCalled();
+    expect(result.recommendations).toEqual([]);
+    expect(generateSpy).not.toHaveBeenCalled();
   });
 
   it('flags only the highest severity reached for each metric', async () => {
@@ -108,24 +107,30 @@ describe('IngestMetricsUsecase', () => {
     expect(anomalies).toEqual([
       {
         timestamp: '2023-10-01T12:05:00Z',
-        metricName: 'cpu_usage',
+        metric: 'cpu_usage',
         value: 95,
         threshold: 90,
         severity: 'high',
+        description:
+          '`cpu_usage reached 95` (>= high threshold of 90) at 2023-10-01T12:05:00Z',
       },
       {
         timestamp: '2023-10-01T12:05:00Z',
-        metricName: 'memory_usage',
+        metric: 'memory_usage',
         value: 75,
         threshold: 75,
         severity: 'low',
+        description:
+          'memory_usage reached 75 (>= low threshold of 75) at 2023-10-01T12:05:00Z',
       },
       {
         timestamp: '2023-10-01T12:05:00Z',
-        metricName: 'latency_ms',
+        metric: 'latency_ms',
         value: 200,
         threshold: 200,
         severity: 'medium',
+        description:
+          'latency_ms reached 200 (>= medium threshold of 200) at 2023-10-01T12:05:00Z',
       },
     ]);
   });
@@ -144,17 +149,21 @@ describe('IngestMetricsUsecase', () => {
     expect(anomalies).toEqual([
       {
         timestamp: '2023-10-01T12:10:00Z',
-        metricName: 'active_connections',
+        metric: 'active_connections',
         value: 70,
         threshold: 70,
         severity: 'medium',
+        description:
+          'active_connections reached 70 (>= medium threshold of 70) at 2023-10-01T12:10:00Z',
       },
       {
         timestamp: '2023-10-01T12:10:00Z',
-        metricName: 'thread_count',
+        metric: 'thread_count',
         value: 185,
         threshold: 180,
         severity: 'high',
+        description:
+          'thread_count reached 185 (>= high threshold of 180) at 2023-10-01T12:10:00Z',
       },
     ]);
   });
@@ -171,25 +180,25 @@ describe('IngestMetricsUsecase', () => {
     expect(anomalies).toHaveLength(2);
     expect(anomalies[0]).toMatchObject({
       timestamp: '2023-10-01T12:05:00Z',
-      metricName: 'error_rate',
+      metric: 'error_rate',
       severity: 'high',
     });
     expect(anomalies[1]).toMatchObject({
       timestamp: '2023-10-01T12:10:00Z',
-      metricName: 'io_wait',
+      metric: 'io_wait',
       severity: 'medium',
     });
   });
 
   it('triggers a diagnostic when metric anomalies are detected', async () => {
-    const diagnoseSpy = vi.spyOn(diagnosticGateway, 'diagnose');
+    const generateSpy = vi.spyOn(diagnosticGateway, 'generateRecommendations');
     const metrics = [buildMetric({ cpu_usage: 92, io_wait: 9 })];
 
     const result = await usecase.run(metrics);
 
-    expect(result.hasPotentialIssues).toBe(true);
-    expect(result.diagnostic).toEqual(cannedDiagnostic);
-    expect(diagnoseSpy).toHaveBeenCalledExactlyOnceWith({
+    expect(result.recommendations).toEqual(cannedRecommendations);
+    expect(generateSpy).toHaveBeenCalledExactlyOnceWith({
+      metrics,
       summary: {
         insights: result.insights,
         service_status_summary: result.service_status_summary,
@@ -199,7 +208,7 @@ describe('IngestMetricsUsecase', () => {
   });
 
   it('triggers a diagnostic when a service is degraded or offline even without metric anomalies', async () => {
-    const diagnoseSpy = vi.spyOn(diagnosticGateway, 'diagnose');
+    const generateSpy = vi.spyOn(diagnosticGateway, 'generateRecommendations');
     const metrics = [
       buildMetric({
         service_status: {
@@ -213,9 +222,9 @@ describe('IngestMetricsUsecase', () => {
     const result = await usecase.run(metrics);
 
     expect(result.anomalies).toEqual([]);
-    expect(result.hasPotentialIssues).toBe(true);
-    expect(result.diagnostic).toEqual(cannedDiagnostic);
-    expect(diagnoseSpy).toHaveBeenCalledExactlyOnceWith({
+    expect(result.recommendations).toEqual(cannedRecommendations);
+    expect(generateSpy).toHaveBeenCalledExactlyOnceWith({
+      metrics,
       summary: {
         insights: result.insights,
         service_status_summary: {
