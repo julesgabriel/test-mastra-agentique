@@ -18,19 +18,39 @@ Follow these rules:
 
 @Injectable()
 export class MastraRecommendationGateway implements RecommendationGatewayContract {
-  private readonly agent = new Agent({
-    id: 'sre-recommendation-agent',
-    name: 'SRE Recommendation Agent',
-    model: process.env.DIAGNOSTIC_MODEL!,
-    instructions: SRE_RECOMMENDATION_INSTRUCTIONS,
-  });
-
   async generateRecommendations(
     context: RecommendationContext,
   ): Promise<RecommendationVo[]> {
-    const response = await this.agent.generate(JSON.stringify(context), {
-      structuredOutput: { schema: recommendationOutputSchema },
+
+    const agent = new Agent({
+      id: 'sre-recommendation-agent',
+      name: 'SRE Recommendation Agent',
+      model: [
+        {
+          maxRetries: 1,
+          model: process.env.DIAGNOSTIC_MODEL!,
+        },
+        {
+          maxRetries: 1,
+          model: 'google/gemini-3.6-flash',
+        },
+        {
+          maxRetries: 1,
+          model: 'google/gemini-3.1-pro-preview-customtools',
+        },
+      ],
+      instructions: SRE_RECOMMENDATION_INSTRUCTIONS,
     });
+
+    const response = await agent.generate(
+      JSON.stringify(context),
+      {
+        structuredOutput: {
+          schema: recommendationOutputSchema,
+        },
+        maxSteps: 5,
+      },
+    );
 
     if (!response.object) {
       throw new Error(

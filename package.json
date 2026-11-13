@@ -19,7 +19,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "ingest": "curl -s -S -X POST http://localhost:3000/ingestion -H \"Content-Type: application/json\" -d @rapport.json -o output.json -w \"✅ Ingestion terminée (HTTP %{http_code} en %{time_total}s) -> output.json\\n\""
   },
   "dependencies": {
     "@mastra/core": "^1.82.0",

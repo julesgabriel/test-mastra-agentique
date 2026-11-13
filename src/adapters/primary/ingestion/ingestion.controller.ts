@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Logger,
   PipeTransform,
   Post,
 } from '@nestjs/common';
@@ -13,6 +14,8 @@ import { CreateMetricDto, ingestPayloadSchema } from './validators/metrics.js';
 
 @Controller('ingestion')
 export class IngestionController {
+  private readonly logger = new Logger(IngestionController.name);
+
   constructor(private readonly ingestMetricsUsecase: IngestMetricsUsecase) {}
 
   @Post()
@@ -20,13 +23,22 @@ export class IngestionController {
     @Body(new ZodValidationPipe(ingestPayloadSchema))
     createMetricDto: CreateMetricDto[],
   ) {
+    this.logger.log(
+      `Ingestion démarrée : ${createMetricDto.length} relevés reçus`,
+    );
+
     const result = await this.ingestMetricsUsecase.run(createMetricDto);
+
+    this.logger.log(
+      `Ingestion terminée avec succès : ${result.anomalies.length} anomalies détectées, ${result.recommendations.length} recommandations générées`,
+    );
 
     return {
       timestamp: result.timestamp,
       insights: result.insights,
       anomalies: result.anomalies.map(
-        ({ metric, value, threshold, severity, description }) => ({
+        ({ metric, value, threshold, severity, description, timestamp }) => ({
+          timestamp,
           metric,
           value,
           threshold,

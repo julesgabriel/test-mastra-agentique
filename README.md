@@ -96,10 +96,15 @@ pnpm start:dev
 Dans un second terminal, envoyer le fichier de logs sur le endpoint d'ingestion :
 
 ```bash
-curl -s -X POST http://localhost:3000/ingestion \
+# Via le script pnpm (génère output.json)
+pnpm ingest
+
+# Ou directement avec curl
+curl -s -S -X POST http://localhost:3000/ingestion \
   -H "Content-Type: application/json" \
   -d @rapport.json \
-  -o output.json
+  -o output.json \
+  -w "✅ Ingestion terminée (HTTP %{http_code} en %{time_total}s) -> output.json\n"
 ```
 
 ## 5. Synthèse des Résultats sur `rapport.json`

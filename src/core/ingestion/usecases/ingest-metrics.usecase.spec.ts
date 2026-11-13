@@ -112,7 +112,7 @@ describe('IngestMetricsUsecase', () => {
         threshold: 90,
         severity: 'high',
         description:
-          '`cpu_usage reached 95` (>= high threshold of 90) at 2023-10-01T12:05:00Z',
+          'cpu_usage reached 95 (>= high threshold of 90) at 2023-10-01T12:05:00Z',
       },
       {
         timestamp: '2023-10-01T12:05:00Z',
